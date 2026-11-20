@@ -1,0 +1,6 @@
+{
+  "appId": "my.kunkwan.changchang",
+  "appName": "ChangChang",
+  "webDir": "dist",
+  "android": { "allowMixedContent": false }
+}
