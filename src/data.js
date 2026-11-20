@@ -74,7 +74,7 @@ export const ACHIEVEMENTS = [
   { id: 'perfect', icon: '🎯', name: 'Perfect Tones', desc: 'Score 100% on a line' },
   { id: 'xp-100', icon: '⭐', name: 'Rising Star', desc: 'Earn 100 XP' },
   { id: 'streak-7', icon: '🏆', name: 'Week Warrior', desc: '7-day streak' },
-  { id: 'all-songs', icon: '👑', name: 'Song Master', desc: 'Finish every song' },
+  { id: 'friend', icon: '🤝', name: 'Better Together', desc: 'A friend joined with your code' },
 ];
 
 export const TONE_INFO = {

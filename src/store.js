@@ -4,7 +4,7 @@ import { useSyncExternalStore } from 'react';
 import { pinyin } from 'pinyin-pro';
 import { SEED_SONGS } from './data';
 
-const KEY = 'changchang_v1';
+const KEY = 'changchang_v2';
 const CONTENT_KEY = 'changchang_content_v1';
 const listeners = new Set();
 
@@ -20,6 +20,10 @@ const defaultState = () => ({
   todayXp: 0,
   progress: {}, // songId -> { done: [lineIdx], best: {lineIdx: score}, completed }
   achievements: [],
+  hearts: 5,
+  referrals: [],
+  referralCode: null,
+  gems: 120,
   reminders: true,
   reminderTime: '20:00',
 });
@@ -74,8 +78,43 @@ function set(patch) {
 }
 
 export const actions = {
-  login(name, email) {
-    set({ user: { name, email }, lastActive: today() });
+  login(name, email, refCode) {
+    const base = (name || email).replace(/[^a-z]/gi, '').toUpperCase().slice(0, 5) || 'FRIEND';
+    let h = 0;
+    for (const c of email) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    const code = `${base}-${h.toString(36).toUpperCase().slice(-3)}`;
+    const patch = { user: { name, email }, lastActive: today(), referralCode: code };
+    if (refCode) Object.assign(patch, { referredBy: refCode.toUpperCase(), plan: 'premium', trialEnds: Date.now() + 7 * 864e5 });
+    set(patch);
+  },
+  // ---- referrals (production: /api/referrals, rewards granted by backend on signup / first payment) ----
+  invite(channel) {
+    set((s) => ({ referrals: [...(s.referrals || []), { id: Date.now(), channel, status: 'invited', name: null }] }));
+  },
+  // demo only: simulates the backend webhook when a friend signs up / subscribes with the code
+  demoFriendEvent() {
+    const names = ['Mei Ling', 'Hafiz', 'Jia Hui', 'Arjun', 'Nurul'];
+    let msg = '';
+    set((s) => {
+      const list = [...(s.referrals || [])];
+      const i = list.findIndex((r) => r.status === 'invited');
+      const j = list.findIndex((r) => r.status === 'joined');
+      let gems = s.gems;
+      if (i >= 0) {
+        const name = names[list.filter((r) => r.name).length % names.length];
+        list[i] = { ...list[i], status: 'joined', name };
+        gems += 50;
+        msg = `${name} joined with your code! +50 💎`;
+      } else if (j >= 0) {
+        list[j] = { ...list[j], status: 'subscribed' };
+        msg = `${list[j].name} went Premium — you earned 1 week free! 👑`;
+      }
+      const joined = list.filter((r) => r.status !== 'invited').length;
+      const ach = new Set(s.achievements);
+      if (joined >= 1) ach.add('friend');
+      return { referrals: list, gems, achievements: [...ach] };
+    });
+    return msg;
   },
   logout() {
     set({ user: null });
@@ -103,6 +142,29 @@ export const actions = {
       if (score === 100) ach.add('perfect');
       return { progress: { ...s.progress, [songId]: { ...p, done, best } }, achievements: [...ach] };
     });
+  },
+  // Duolingo-style path: each song (unit) has nodes song → pinyin → speak → chest
+  completeNode(songId, node) {
+    set((s) => {
+      const p = s.progress[songId] || { done: [], best: {} };
+      const np = { ...p, [node]: true };
+      const all = np.song && np.pinyin && np.speak;
+      const ach = new Set(s.achievements);
+      const extend = s.streakDay !== today();
+      const streak = extend ? s.streak + 1 : s.streak;
+      if (all) { np.completed = true; ach.add('first-song'); }
+      if (streak >= 3) ach.add('streak-3');
+      return { progress: { ...s.progress, [songId]: np }, streak, streakDay: today(), _streakJustExtended: extend, lastActive: today(), achievements: [...ach] };
+    });
+  },
+  loseHeart() {
+    set((s) => ({ hearts: s.plan === 'premium' ? s.hearts : Math.max(0, s.hearts - 1) }));
+  },
+  refillHearts() {
+    set({ hearts: 5 });
+  },
+  addGems(n) {
+    set((s) => ({ gems: s.gems + n }));
   },
   completeSong(songId) {
     set((s) => {

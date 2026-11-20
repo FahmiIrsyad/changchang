@@ -7,6 +7,7 @@ Learning journey: **Song → Pinyin → Speaking Practice**.
 ```bash
 npm install
 npm run dev        # app at /#/ , admin portal at /#/admin
+# Android APK is built by GitHub Actions on every push (see Releases)
 npm run build      # single-file build in dist/
 ```
 
@@ -21,6 +22,12 @@ npm run build      # single-file build in dist/
 | 6. Quality & maintenance | Scripted end-to-end walkthrough (Playwright) used to record the demo video |
 | 7. Product collaboration | Dashboard: active learners, lesson funnel, free→paid conversion |
 | 8. Technical ownership | AI + hosting cost per learner on the dashboard |
+| Growth: referrals | Invite screen (personal code, share sheet / WhatsApp, reward ladder, invite status), code field at sign-up, admin referral analytics + editable reward rules |
+
+## Design & media
+- Duolingo-style UX patterns (learning path with unit nodes, one question per screen, check/feedback banner, hearts, streaks, chunky 3D buttons) with ChangChang's own identity.
+- **Three.js** (all procedural, no external assets): Deng Deng the lantern mascot, spinning vinyl stage, voice-reactive orb, trophy with confetti.
+- **Audio without paid services:** melody generated with Web Audio (each note follows its Mandarin tone); voice uses the device's zh-CN text-to-speech (Capacitor plugin on Android/iOS).
 
 ## Production plan
 - **Mobile:** React Native (Expo) — one codebase for Android + iOS, offline audio cache, push reminders (FCM/APNs).

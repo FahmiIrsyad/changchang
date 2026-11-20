@@ -7,6 +7,7 @@ export default function Admin() {
   const nav = [
     ['/admin', '📊', 'Dashboard'],
     ['/admin/songs', '🎵', 'Songs & lessons'],
+    ['/admin/referrals', '🤝', 'Referrals'],
     ['/admin/users', '👥', 'Learners'],
     ['/admin/costs', '💰', 'Service costs'],
   ];
@@ -26,6 +27,7 @@ export default function Admin() {
           <Route index element={<Dashboard />} />
           <Route path="songs" element={<SongList />} />
           <Route path="songs/:id" element={<SongEditor />} />
+          <Route path="referrals" element={<Referrals />} />
           <Route path="users" element={<Dashboard />} />
           <Route path="costs" element={<Dashboard />} />
         </Routes>
@@ -184,6 +186,58 @@ function SongEditor() {
         </div>
       </div>
       {toast && <div className="toast" data-testid="toast">✅ {toast}</div>}
+    </div>
+  );
+}
+
+function Referrals() {
+  const [friendReward, setFriendReward] = useState('7');
+  const [referrerReward, setReferrerReward] = useState('7');
+  const [gems, setGems] = useState('50');
+  const [saved, setSaved] = useState(false);
+  const top = [
+    ['Mei Ling T.', 'MEILI-4QZ', 14, 9, 5],
+    ['Hafiz R.', 'HAFIZ-K2P', 11, 7, 3],
+    ['Jia Hui L.', 'JIAHU-81A', 8, 6, 3],
+    ['Arjun S.', 'ARJUN-0XC', 6, 4, 1],
+    ['Nurul A.', 'NURUL-7DM', 5, 3, 2],
+  ];
+  const funnel = [['Invites sent', 100], ['Link opened', 61], ['Signed up', 38], ['Subscribed', 14]];
+  return (
+    <div className="a-page">
+      <h1>Referrals <small className="muted">Last 30 days · sample data</small></h1>
+      <div className="kpis">
+        <Kpi label="Invites sent" value="1,284" delta="+22%" />
+        <Kpi label="Sign-ups from referrals" value="488" delta="38% of invites" />
+        <Kpi label="Referral → paid" value="14.1%" delta="2.1× organic" />
+        <Kpi label="Reward cost" value="RM 0" delta="Paid in Premium days" neutral />
+      </div>
+      <div className="a-grid">
+        <div className="a-card">
+          <h3>Top referrers</h3>
+          <table className="a-table">
+            <thead><tr><th>Learner</th><th>Code</th><th>Invited</th><th>Joined</th><th>Paid</th></tr></thead>
+            <tbody>
+              {top.map(([n, c, i, j, p]) => (
+                <tr key={c}><td><b>{n}</b></td><td><code>{c}</code></td><td>{i}</td><td>{j}</td><td>{p}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="a-card">
+          <h3>Referral funnel</h3>
+          {funnel.map(([l, v]) => (
+            <div key={l} className="fn"><span>{l}</span><div className="fbar"><i style={{ width: `${v}%` }} /></div><b>{v}%</b></div>
+          ))}
+          <h3 style={{ marginTop: 18 }}>Reward rules</h3>
+          <div className="a-card form rules">
+            <label>New friend gets (days of Premium)<input value={friendReward} onChange={(e) => setFriendReward(e.target.value)} /></label>
+            <label>Referrer gets per paid friend (days)<input value={referrerReward} onChange={(e) => setReferrerReward(e.target.value)} /></label>
+            <label>Gems per sign-up<input value={gems} onChange={(e) => setGems(e.target.value)} /></label>
+            <button className="btn primary" onClick={() => { setSaved(true); setTimeout(() => setSaved(false), 1800); }}>{saved ? 'Saved ✓' : 'Save rules'}</button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -2,8 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { HashRouter, Routes, Route, useNavigate, useParams, Navigate, Link, useLocation } from 'react-router-dom';
 import { actions, toSyllables, useApp, useContent } from './store';
 import { ACHIEVEMENTS, TONE_INFO } from './data';
-import { CHAR_MS, recognise, speak } from './audio';
+import { CHAR_MS, chime, recognise, singLine, speak, stopSpeaking } from './audio';
+import { MascotHero, Trophy3D, VinylStage, VoiceOrb } from './three3d';
 import Admin from './Admin';
+import { Capacitor } from '@capacitor/core';
+import { Share } from '@capacitor/share';
 
 export default function App() {
   return (
@@ -23,14 +26,16 @@ function MobileShell() {
   const showTabs = ['/', '/profile', '/premium'].includes(loc.pathname);
   return (
     <div className="phone">
+      <ScrollTop path={loc.pathname} />
       <div className="screen">
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<Home />} />
-          <Route path="/song/:id" element={<SongLesson />} />
-          <Route path="/song/:id/done" element={<Complete />} />
+          <Route path="/lesson/:id/:node" element={<Lesson />} />
+          <Route path="/done/:id/:node" element={<LessonDone />} />
           <Route path="/premium" element={<Paywall />} />
           <Route path="/profile" element={<Profile />} />
+          <Route path="/invite" element={<Invite />} />
         </Routes>
       </div>
       {showTabs && <TabBar />}
@@ -38,19 +43,25 @@ function MobileShell() {
   );
 }
 
+function ScrollTop({ path }) {
+  useEffect(() => {
+    if (path !== '/') document.querySelector('.screen')?.scrollTo(0, 0);
+  }, [path]);
+  return null;
+}
+
 function TabBar() {
   const { pathname } = useLocation();
   const tabs = [
     ['/', '🏠', 'Learn'],
-    ['/premium', '💎', 'Premium'],
-    ['/profile', '👤', 'Me'],
+    ['/premium', '👑', 'Premium'],
+    ['/profile', '😊', 'Me'],
   ];
   return (
     <nav className="tabbar">
       {tabs.map(([to, ic, label]) => (
         <Link key={to} to={to} className={pathname === to ? 'on' : ''} data-testid={`tab-${label}`}>
           <span>{ic}</span>
-          {label}
         </Link>
       ))}
     </nav>
@@ -64,159 +75,164 @@ function Login() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
+  const [ref, setRef] = useState(() => new URLSearchParams(window.location.search).get('ref') || '');
   const submit = (e) => {
     e.preventDefault();
     if (!email || !pw) return;
-    actions.login(name || email.split('@')[0], email);
+    actions.login(name || email.split('@')[0], email, ref.trim());
     nav('/');
   };
   return (
     <div className="login">
       <div className="login-hero">
-        <div className="logo-badge">唱</div>
+        <MascotHero height={200} />
         <h1>ChangChang</h1>
-        <p>Learn Mandarin through songs.<br />Sing → Read Pinyin → Speak.</p>
+        <p>Learn Mandarin by singing.<br />Fun, free and five minutes a day.</p>
       </div>
-      <form onSubmit={submit} className="card form">
+      <form onSubmit={submit} className="form">
         <div className="seg">
           <button type="button" className={mode === 'register' ? 'on' : ''} onClick={() => setMode('register')}>Sign up</button>
           <button type="button" className={mode === 'login' ? 'on' : ''} onClick={() => setMode('login')}>Log in</button>
         </div>
-        {mode === 'register' && (
-          <input placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} data-testid="name" />
-        )}
+        {mode === 'register' && <input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} data-testid="name" />}
         <input placeholder="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} data-testid="email" />
         <input placeholder="Password" type="password" value={pw} onChange={(e) => setPw(e.target.value)} data-testid="password" />
-        <button className="btn primary big" data-testid="submit">{mode === 'register' ? 'Create account' : 'Log in'}</button>
-        <div className="or">or</div>
+        {mode === 'register' && <input className="ref-input" placeholder="🎁 Referral code (optional)" value={ref} onChange={(e) => setRef(e.target.value)} data-testid="ref" />}
+        <button className="btn3d primary" data-testid="submit">{mode === 'register' ? 'Get started' : 'Log in'}</button>
         <div className="social">
-          <button type="button" className="btn ghost">Continue with Google</button>
-          <button type="button" className="btn ghost">Continue with Apple</button>
+          <button type="button" className="btn3d ghost">Google</button>
+          <button type="button" className="btn3d ghost">Apple</button>
         </div>
-        <Link to="/admin" className="muted small center">Education team? Open the admin portal →</Link>
+        <Link to="/admin" className="admin-link">Education team? Open the admin portal →</Link>
       </form>
     </div>
   );
 }
 
-/* ---------------- Home ---------------- */
-function Home() {
+/* ---------------- Top status bar ---------------- */
+function StatusBar() {
   const app = useApp();
-  const songs = useContent().filter((s) => s.published);
-  const nav = useNavigate();
-  const pct = Math.min(100, Math.round((app.todayXp / app.dailyGoal) * 100));
-  const next = songs.find((s) => !app.progress[s.id]?.completed && (!s.premium || app.plan === 'premium')) || songs[0];
   return (
-    <div className="page home">
-      <header className="home-top">
-        <div>
-          <div className="muted small">你好, {app.user?.name} 👋</div>
-          <h2>Let's sing today</h2>
-        </div>
-        <div className="chips">
-          <span className="chip fire" data-testid="streak">🔥 {app.streak}</span>
-          <span className="chip xp">⭐ {app.xp}</span>
-        </div>
-      </header>
-
-      <div className="card goal">
-        <Ring pct={pct} />
-        <div>
-          <div className="goal-title">Daily goal</div>
-          <div className="muted small">{app.todayXp} / {app.dailyGoal} XP today</div>
-          <div className="week">
-            {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
-              <span key={i} className={i < app.streak ? 'hit' : ''}>{d}</span>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {next && (
-        <button className="card continue" style={{ '--c': next.color }} onClick={() => nav(`/song/${next.id}`)} data-testid="continue">
-          <div className="cont-emoji">{next.emoji}</div>
-          <div className="grow">
-            <div className="muted small">Continue</div>
-            <div className="cont-title">{next.title} <span>{next.titleEn}</span></div>
-            <Progress song={next} />
-          </div>
-          <div className="play">▶</div>
-        </button>
-      )}
-
-      <h3 className="section">Song library</h3>
-      <div className="songs">
-        {songs.map((s) => {
-          const locked = s.premium && app.plan !== 'premium';
-          const done = app.progress[s.id]?.completed;
-          return (
-            <button
-              key={s.id}
-              className={`song-card ${locked ? 'locked' : ''}`}
-              style={{ '--c': s.color }}
-              onClick={() => nav(locked ? '/premium' : `/song/${s.id}`)}
-              data-testid={`song-${s.id}`}
-            >
-              <div className="song-emoji">{s.emoji}</div>
-              <div className="song-zh">{s.title}</div>
-              <div className="song-en">{s.titleEn}</div>
-              <div className="song-meta">
-                {locked ? <span className="tag pro">🔒 Premium</span> : done ? <span className="tag ok">✓ Done</span> : <span className="tag">{s.level}</span>}
-              </div>
-            </button>
-          );
-        })}
-      </div>
+    <div className="statusbar">
+      <span className="lang-chip">中</span>
+      <span className="stat fire" data-testid="streak">🔥 {app.streak}</span>
+      <span className="stat gem">⭐ {app.xp}</span>
+      <span className="stat heart">❤️ {app.plan === 'premium' ? '∞' : app.hearts}</span>
     </div>
   );
 }
 
-function Ring({ pct }) {
-  const r = 30, c = 2 * Math.PI * r;
-  return (
-    <svg width="76" height="76" viewBox="0 0 76 76" className="ring">
-      <circle cx="38" cy="38" r={r} stroke="#F1E6DA" strokeWidth="8" fill="none" />
-      <circle cx="38" cy="38" r={r} stroke="var(--red)" strokeWidth="8" fill="none" strokeLinecap="round"
-        strokeDasharray={c} strokeDashoffset={c - (c * pct) / 100} transform="rotate(-90 38 38)" style={{ transition: 'stroke-dashoffset .8s' }} />
-      <text x="38" y="43" textAnchor="middle" fontSize="15" fontWeight="800" fill="var(--ink)">{pct}%</text>
-    </svg>
-  );
-}
+/* ---------------- Home: learning path ---------------- */
+const NODES = [
+  { key: 'song', icon: '🎵', label: 'Sing' },
+  { key: 'pinyin', icon: '拼', label: 'Pinyin' },
+  { key: 'speak', icon: '🎤', label: 'Speak' },
+  { key: 'chest', icon: '🎁', label: 'Reward' },
+];
+const OFFSETS = [0, 62, 0, -62];
 
-function Progress({ song }) {
+function Home() {
   const app = useApp();
-  const done = app.progress[song.id]?.done?.length || 0;
-  const pct = Math.round((done / song.lines.length) * 100);
+  const songs = useContent().filter((s) => s.published);
+  const nav = useNavigate();
+  const [toast, setToast] = useState('');
+  let current = null;
+  for (const s of songs) {
+    if (s.premium && app.plan !== 'premium') continue;
+    const p = app.progress[s.id] || {};
+    const n = NODES.find((x) => !p[x.key]);
+    if (n) { current = `${s.id}:${n.key}`; break; }
+  }
+  const open = (song, node, state) => {
+    if (state === 'premium') return nav('/premium');
+    if (state === 'locked') return;
+    if (node.key === 'chest') {
+      if (state === 'done') return;
+      actions.completeNode(song.id, 'chest');
+      actions.addXp(20);
+      actions.addGems(15);
+      chime(true);
+      setToast('🎁 Chest opened! +20 XP · +15 💎');
+      setTimeout(() => setToast(''), 2400);
+      return;
+    }
+    nav(`/lesson/${song.id}/${node.key}`);
+  };
+  useEffect(() => {
+    document.querySelector('.node.current')?.scrollIntoView?.({ block: 'center' });
+  }, []);
+
   return (
-    <div className="bar"><i style={{ width: `${pct}%` }} /></div>
+    <div className="home">
+      <StatusBar />
+      <div className="path">
+        {songs.map((song, ui) => {
+          const locked = song.premium && app.plan !== 'premium';
+          const p = app.progress[song.id] || {};
+          return (
+            <section key={song.id} className="unit" style={{ '--c': song.color }}>
+              <div className={`unit-banner ${locked ? 'is-locked' : ''}`} data-testid={`unit-${song.id}`}>
+                <div>
+                  <div className="unit-kicker">UNIT {ui + 1}{locked ? ' · 👑 PREMIUM' : ''}</div>
+                  <div className="unit-title">{song.title} <span>{song.titleEn}</span></div>
+                </div>
+                <button className="guide" onClick={() => (locked ? nav('/premium') : nav(`/lesson/${song.id}/song`))}>{song.emoji}</button>
+              </div>
+              <div className="nodes">
+                {ui === 0 && <div className="path-mascot"><MascotHero height={150} chars={[]} /></div>}
+                {NODES.map((node, ni) => {
+                  const id = `${song.id}:${node.key}`;
+                  const state = locked ? 'premium' : p[node.key] ? 'done' : id === current ? 'current' : 'locked';
+                  return (
+                    <div key={node.key} className="node-wrap" style={{ transform: `translateX(${OFFSETS[ni]}px)` }}>
+                      {state === 'current' && <div className="start-tip">{node.key === 'chest' ? 'OPEN' : 'START'}</div>}
+                      <button className={`node ${state} ${node.key}`} onClick={() => open(song, node, state)} data-testid={`node-${song.id}-${node.key}`}>
+                        <span>{state === 'done' && node.key !== 'chest' ? '✓' : state === 'premium' ? '🔒' : node.icon}</span>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              {ui === 0 && (
+                <button className="invite-promo" onClick={() => nav('/invite')} data-testid="invite-promo">
+                  <span className="ip-ic">🎁</span>
+                  <span className="grow"><b>Invite friends, get Premium free</b><small>1 week of Premium for every friend who joins</small></span>
+                  <span className="ip-go">›</span>
+                </button>
+              )}
+            </section>
+          );
+        })}
+      </div>
+      {toast && <div className="app-toast">{toast}</div>}
+    </div>
   );
 }
 
-/* ---------------- Lesson: Song → Pinyin → Speak ---------------- */
-function SongLesson() {
-  const { id } = useParams();
+/* ---------------- Lesson shell ---------------- */
+function Lesson() {
+  const { id, node } = useParams();
   const song = useContent().find((s) => s.id === id);
   const app = useApp();
   const nav = useNavigate();
-  const [step, setStep] = useState(0);
+  const [progress, setProgress] = useState(0);
   if (!song) return <Navigate to="/" />;
   if (song.premium && app.plan !== 'premium') return <Navigate to="/premium" />;
-  const steps = ['Song', 'Pinyin', 'Speak'];
+  const finish = (earned) => {
+    actions.completeNode(song.id, node);
+    actions.addXp(earned);
+    nav(`/done/${song.id}/${node}?xp=${earned}`);
+  };
   return (
-    <div className="page lesson" style={{ '--c': song.color }}>
+    <div className="lesson" style={{ '--c': song.color }}>
       <header className="lesson-top">
-        <button className="icon-btn" onClick={() => nav('/')}>✕</button>
-        <div className="stepper">
-          {steps.map((s, i) => (
-            <button key={s} className={`st ${i === step ? 'on' : ''} ${i < step ? 'past' : ''}`} onClick={() => setStep(i)} data-testid={`step-${s}`}>
-              <b>{i + 1}</b>{s}
-            </button>
-          ))}
-        </div>
+        <button className="x" onClick={() => { stopSpeaking(); nav('/'); }} data-testid="quit">✕</button>
+        <div className="pbar"><i style={{ width: `${Math.max(4, progress * 100)}%` }} /></div>
+        <span className="hearts">❤️ {app.plan === 'premium' ? '∞' : app.hearts}</span>
       </header>
-      {step === 0 && <SongStep song={song} onNext={() => setStep(1)} />}
-      {step === 1 && <PinyinStep song={song} onNext={() => setStep(2)} />}
-      {step === 2 && <SpeakStep song={song} onDone={() => { actions.completeSong(song.id); actions.addXp(20); nav(`/song/${song.id}/done`); }} />}
+      {node === 'song' && <SongStep song={song} setProgress={setProgress} onDone={finish} />}
+      {node === 'pinyin' && <PinyinQuiz song={song} setProgress={setProgress} onDone={finish} />}
+      {node === 'speak' && <SpeakStep song={song} setProgress={setProgress} onDone={finish} />}
     </div>
   );
 }
@@ -230,11 +246,11 @@ function Syl({ s, active, showPy = true, big, onClick, state }) {
   );
 }
 
-function SongStep({ song, onNext }) {
+/* ----- 1. Song: sing along ----- */
+function SongStep({ song, setProgress, onDone }) {
   const lines = useMemo(() => song.lines.map((l) => ({ ...l, syl: toSyllables(l.zh) })), [song]);
   const [pos, setPos] = useState({ line: -1, ch: -1 });
   const [playing, setPlaying] = useState(false);
-  const [showPy, setShowPy] = useState(true);
   const stop = useRef(false);
 
   const play = async () => {
@@ -242,9 +258,10 @@ function SongStep({ song, onNext }) {
     stop.current = false;
     setPlaying(true);
     for (let li = 0; li < lines.length && !stop.current; li++) {
-      speak(lines[li].zh);
+      singLine(lines[li].syl, li);
       for (let ci = 0; ci < lines[li].syl.length && !stop.current; ci++) {
         setPos({ line: li, ch: ci });
+        setProgress((li + (ci + 1) / lines[li].syl.length) / lines.length);
         await wait(CHAR_MS);
       }
       await wait(250);
@@ -252,103 +269,157 @@ function SongStep({ song, onNext }) {
     setPlaying(false);
     setPos({ line: -1, ch: -1 });
   };
-  useEffect(() => () => { stop.current = true; window.speechSynthesis?.cancel(); }, []);
+  useEffect(() => () => { stop.current = true; stopSpeaking(); }, []);
 
   return (
-    <div className="step-body">
-      <div className="song-hero">
-        <div className={`disc ${playing ? 'spin' : ''}`}>{song.emoji}</div>
-        <div>
-          <h2>{song.title}</h2>
-          <div className="muted">{song.titleEn}</div>
+    <>
+      <div className="lesson-body">
+        <h2 className="q-title">Listen and sing along</h2>
+        <div className="song-stage">
+          <VinylStage playing={playing} color={song.color} title={song.title} height={140} />
+        </div>
+        <div className="lyrics">
+          {lines.map((l, li) => (
+            <div key={li} className={`lyric ${pos.line === li ? 'cur' : ''}`}>
+              <div className="hz">
+                {l.syl.map((s, ci) => <Syl key={ci} s={s} active={pos.line === li && ci <= pos.ch} />)}
+              </div>
+              <div className="en">{l.en}<button className="say" onClick={() => speak(l.zh)} title="Hear it spoken">🔊</button></div>
+            </div>
+          ))}
         </div>
       </div>
-      <div className="lyrics">
-        {lines.map((l, li) => (
-          <div key={li} className={`lyric ${pos.line === li ? 'cur' : ''}`}>
-            <div className="hz">
-              {l.syl.map((s, ci) => (
-                <Syl key={ci} s={s} showPy={showPy} active={pos.line === li && ci <= pos.ch} />
-              ))}
-            </div>
-            <div className="en">{l.en}</div>
-          </div>
-        ))}
-      </div>
-      <div className="controls">
-        <label className="toggle"><input type="checkbox" checked={showPy} onChange={() => setShowPy(!showPy)} /> Pinyin</label>
-        <button className="btn round" onClick={play} data-testid="play">{playing ? '❚❚' : '▶'}</button>
-        <button className="btn primary" onClick={onNext} data-testid="next">Next: Pinyin →</button>
-      </div>
-    </div>
+      <footer className="lesson-foot">
+        <button className={`btn3d round-play ${playing ? 'on' : ''}`} onClick={play} data-testid="play">{playing ? '❚❚' : '▶'}</button>
+        <button className="btn3d primary grow" onClick={() => { stop.current = true; onDone(15); }} data-testid="next">Continue</button>
+      </footer>
+    </>
   );
 }
 
-function PinyinStep({ song, onNext }) {
-  const lines = useMemo(() => song.lines.map((l) => ({ ...l, syl: toSyllables(l.zh) })), [song]);
-  const [sel, setSel] = useState({ li: 0, ci: 0 });
-  const s = lines[sel.li].syl[sel.ci];
-  const info = TONE_INFO[s.tone];
+/* ----- 2. Pinyin quiz ----- */
+const VOWEL_MARKS = { a: 'āáǎà', e: 'ēéěè', i: 'īíǐì', o: 'ōóǒò', u: 'ūúǔù', ü: 'ǖǘǚǜ' };
+function stripTone(py) {
+  return py.normalize('NFD').replace(/[̀́̌̄]/g, '').normalize('NFC');
+}
+function markTone(base, tone) {
+  if (!tone) return base;
+  let idx = base.search(/[ae]/);
+  if (idx < 0) idx = base.indexOf('ou');
+  if (idx < 0) {
+    for (let i = base.length - 1; i >= 0; i--) if ('iouü'.includes(base[i])) { idx = i; break; }
+  }
+  if (idx < 0) return base;
+  const v = base[idx];
+  return base.slice(0, idx) + VOWEL_MARKS[v][tone - 1] + base.slice(idx + 1);
+}
+function buildQuiz(song) {
+  const all = song.lines.flatMap((l) => toSyllables(l.zh));
+  const uniq = [];
+  all.forEach((s) => { if (s.tone && !uniq.find((u) => u.ch === s.ch)) uniq.push(s); });
+  const pick = [uniq[1], uniq[3], uniq[5], uniq[7]].filter(Boolean);
+  return pick.map((s, i) => {
+    if (i % 2 === 0) {
+      const base = stripTone(s.py);
+      const tones = [1, 2, 3, 4].filter((t) => t !== s.tone);
+      const opts = [s.py, markTone(base, tones[(i + 1) % 3]), markTone(base, tones[(i + 2) % 3])];
+      const order = [[1, 0, 2], [2, 1, 0], [0, 2, 1]][i % 3].map((k) => opts[k]);
+      return { type: 'py', s, options: order, answer: s.py };
+    }
+    return { type: 'tone', s, options: [1, 2, 3, 4], answer: s.tone };
+  });
+}
+
+function PinyinQuiz({ song, setProgress, onDone }) {
+  const qs = useMemo(() => buildQuiz(song), [song]);
+  const [qi, setQi] = useState(0);
+  const [sel, setSel] = useState(null);
+  const [checked, setChecked] = useState(null);
+  const [score, setScore] = useState(0);
+  const q = qs[qi];
+  useEffect(() => { setProgress(qi / qs.length); }, [qi, qs.length, setProgress]);
+  const hear = () => { singLine([q.s], 0); setTimeout(() => speak(q.s.ch, 0.6), 450); };
+  const check = () => {
+    const ok = sel === q.answer;
+    setChecked(ok ? 'right' : 'wrong');
+    chime(ok);
+    if (ok) setScore(score + 1); else actions.loseHeart();
+    setProgress((qi + 1) / qs.length);
+  };
+  const next = () => {
+    if (qi < qs.length - 1) { setQi(qi + 1); setSel(null); setChecked(null); }
+    else onDone(10 + score * 5);
+  };
   return (
-    <div className="step-body">
-      <div className="card tone-card" style={{ '--tc': info.color }}>
-        <div className="tc-ch">{s.ch}</div>
-        <div className="grow">
-          <div className="tc-py">{s.py}</div>
-          <div className="tc-name">{info.name} — {info.desc}</div>
-          <ToneCurve tone={s.tone} />
-        </div>
-        <button className="icon-btn" onClick={() => speak(s.ch, 0.6)} title="Listen">🔊</button>
-      </div>
-      <div className="legend">
-        {[1, 2, 3, 4, 0].map((t) => (
-          <span key={t} className={`lg t${t}`}>{TONE_INFO[t].name}</span>
-        ))}
-      </div>
-      <div className="lyrics compact">
-        {lines.map((l, li) => (
-          <div key={li} className="lyric">
-            <div className="hz">
-              {l.syl.map((x, ci) => (
-                <Syl key={ci} s={x} big active={sel.li === li && sel.ci === ci} onClick={() => { setSel({ li, ci }); speak(x.ch, 0.6); }} />
-              ))}
-            </div>
+    <>
+      <div className="lesson-body">
+        <span className="new-word">✨ NEW WORD</span>
+        <h2 className="q-title">{q.type === 'py' ? 'Choose the correct Pinyin' : 'Which tone is it?'}</h2>
+        <button className="char-card" onClick={hear} data-testid="char-card">
+          <span className="speaker">🔊</span>
+          <b>{q.s.ch}</b>
+          {q.type === 'tone' && <small>{stripTone(q.s.py)}</small>}
+        </button>
+        {q.type === 'py' ? (
+          <div className="options">
+            {q.options.map((o) => (
+              <button key={o} className={`opt ${sel === o ? 'sel' : ''} ${checked && o === q.answer ? 'right' : ''} ${checked === 'wrong' && sel === o ? 'wrong' : ''}`}
+                disabled={!!checked} onClick={() => setSel(o)} data-testid={`opt-${o}`} data-ok={o === q.answer ? '1' : '0'}>
+                {o}
+              </button>
+            ))}
           </div>
-        ))}
+        ) : (
+          <div className="tone-grid">
+            {q.options.map((t) => (
+              <button key={t} className={`tone-opt t${t} ${sel === t ? 'sel' : ''} ${checked && t === q.answer ? 'right' : ''} ${checked === 'wrong' && sel === t ? 'wrong' : ''}`}
+                disabled={!!checked} onClick={() => { setSel(t); singLine([{ tone: t }], 0); }} data-testid={`tone-${t}`} data-ok={t === q.answer ? '1' : '0'}>
+                <ToneCurve tone={t} />
+                <b>{markTone(stripTone(q.s.py), t)}</b>
+                <small>{TONE_INFO[t].name}</small>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-      <div className="controls">
-        <span className="muted small">Tap any character to hear it</span>
-        <button className="btn primary" onClick={onNext} data-testid="next">Next: Speak →</button>
-      </div>
-    </div>
+      <footer className={`lesson-foot ${checked || ''}`}>
+        {checked ? (
+          <div className="verdict">
+            <div className="v-title">{checked === 'right' ? ['Nice!', 'Great job!', 'Correct!', '太棒了!'][qi % 4] : 'Not quite'}</div>
+            {checked === 'wrong' && <div className="v-sub">Correct answer: <b>{q.type === 'py' ? q.answer : `${TONE_INFO[q.answer].name} — ${q.s.py}`}</b></div>}
+            <button className={`btn3d primary ${checked === 'right' ? 'green' : ''}`} onClick={next} data-testid="continue">Continue</button>
+          </div>
+        ) : (
+          <button className="btn3d primary grow" disabled={sel === null} onClick={check} data-testid="check">Check</button>
+        )}
+      </footer>
+    </>
   );
 }
 
 function ToneCurve({ tone }) {
-  const paths = {
-    1: 'M6 10 L94 10',
-    2: 'M6 30 Q60 26 94 6',
-    3: 'M6 16 Q40 40 60 34 T94 8',
-    4: 'M6 6 L94 36',
-    0: 'M44 24 L56 24',
-  };
+  const paths = { 1: 'M6 10 L94 10', 2: 'M6 32 Q60 28 94 6', 3: 'M6 14 Q40 40 60 34 T94 8', 4: 'M6 6 L94 36', 0: 'M44 22 L56 22' };
   return (
     <svg viewBox="0 0 100 42" className="curve">
-      <path d={paths[tone]} stroke="var(--tc)" strokeWidth="5" fill="none" strokeLinecap="round" />
+      <path d={paths[tone]} stroke="currentColor" strokeWidth="6" fill="none" strokeLinecap="round" />
     </svg>
   );
 }
 
-function SpeakStep({ song, onDone }) {
+/* ----- 3. Speaking ----- */
+function SpeakStep({ song, setProgress, onDone }) {
   const lines = useMemo(() => song.lines.map((l) => ({ ...l, syl: toSyllables(l.zh) })), [song]);
   const [li, setLi] = useState(0);
-  const [phase, setPhase] = useState('idle'); // idle | listening | recording | scoring | result
+  const [phase, setPhase] = useState('idle');
   const [result, setResult] = useState(null);
+  const [total, setTotal] = useState(0);
   const line = lines[li];
+  useEffect(() => { setProgress(li / lines.length); }, [li, lines.length, setProgress]);
 
   const listen = async () => {
     setPhase('listening');
-    await speak(line.zh);
+    singLine(line.syl, li);
+    await Promise.all([speak(line.zh), wait(line.syl.length * CHAR_MS)]);
     setPhase('idle');
   };
   const record = async () => {
@@ -358,104 +429,87 @@ function SpeakStep({ song, onDone }) {
     setPhase('scoring');
     const r = await recognise(line.zh, `${song.id}-${li}`, line.syl);
     actions.recordLine(song.id, li, r.score);
-    actions.addXp(r.score === 100 ? 10 : 5);
+    chime(r.score === 100);
     setResult(r);
     setPhase('result');
+    if (r.score === 100) setProgress((li + 1) / lines.length);
   };
   const next = () => {
-    if (li < lines.length - 1) { setLi(li + 1); setResult(null); setPhase('idle'); }
-    else onDone();
+    const add = result?.score === 100 ? 10 : 5;
+    if (li < lines.length - 1) { setTotal(total + add); setLi(li + 1); setResult(null); setPhase('idle'); }
+    else onDone(total + add);
   };
   const missIdx = result ? result.perChar.findIndex((x) => !x) : -1;
   const miss = missIdx >= 0 ? line.syl[missIdx] : null;
+  const good = result?.score === 100;
 
   return (
-    <div className="step-body speak">
-      <div className="muted small center">Line {li + 1} of {lines.length} · Listen & repeat</div>
-      <div className="dots">{lines.map((_, i) => <i key={i} className={i < li ? 'done' : i === li ? 'cur' : ''} />)}</div>
-      <div className="card speak-card">
-        <div className="hz">
-          {line.syl.map((s, ci) => (
-            <Syl key={ci} s={s} big state={result ? (result.perChar[ci] ? 'good' : 'bad') : ''} />
-          ))}
+    <>
+      <div className="lesson-body">
+        <h2 className="q-title">Speak this sentence</h2>
+        <div className="speak-row">
+          <div className="mini-lantern"><MascotHero height={118} chars={[]} /></div>
+          <button className="say-bubble" onClick={listen} data-testid="listen">
+            <span className="speaker">🔊</span>
+            <span className="hz">
+              {line.syl.map((s, ci) => <Syl key={ci} s={s} state={result ? (result.perChar[ci] ? 'good' : 'bad') : ''} />)}
+            </span>
+            <small>{line.en}</small>
+          </button>
         </div>
-        <div className="en center">{line.en}</div>
-        <button className="btn ghost" onClick={listen} disabled={phase === 'recording'} data-testid="listen">
-          {phase === 'listening' ? '🔊 Playing…' : '🔊 Listen'}
-        </button>
+        <VoiceOrb height={150} state={phase === 'result' ? (good ? 'good' : 'bad') : phase} />
+        <div className="center muted small">{phase === 'recording' ? 'Listening… sing it back!' : phase === 'scoring' ? 'AI is checking your tones…' : phase === 'listening' ? 'Playing the line…' : `Line ${li + 1} of ${lines.length}`}</div>
       </div>
-
-      {phase === 'recording' && <Wave />}
-      {phase === 'scoring' && <div className="scoring">AI is checking your tones…</div>}
-
-      {result && (
-        <div className={`card feedback ${result.score === 100 ? 'perfect' : ''}`} data-testid="feedback">
-          <div className="score-ring" style={{ '--p': result.score }}><span>{result.score}</span></div>
-          <div className="grow">
-            {result.score === 100 ? (
-              <>
-                <div className="fb-title">完美! Perfect tones 🎉</div>
-                <div className="muted small">+10 XP · every syllable matched</div>
-              </>
-            ) : (
-              <>
-                <div className="fb-title">Almost! Check <b className={`t${miss?.tone}`}>{miss?.ch} {miss?.py}</b></div>
-                <div className="muted small">AI coach: {TONE_INFO[miss?.tone ?? 0].name} — {TONE_INFO[miss?.tone ?? 0].desc.toLowerCase()}. Try again slowly.</div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      <div className="mic-row">
-        {phase === 'result' && result.score < 100 ? (
-          <button className="btn ghost" onClick={next}>Skip</button>
-        ) : <span />}
-        <button className={`mic ${phase === 'recording' ? 'rec' : ''}`} onClick={record} disabled={phase === 'recording' || phase === 'scoring'} data-testid="mic">
-          🎤
-        </button>
+      <footer className={`lesson-foot ${phase === 'result' ? (good ? 'right' : 'wrong') : ''}`}>
         {phase === 'result' ? (
-          <button className="btn primary" onClick={next} data-testid="next-line">{li < lines.length - 1 ? 'Next →' : 'Finish'}</button>
-        ) : <span />}
-      </div>
-      <div className="muted small center">{phase === 'recording' ? 'Recording… sing it back!' : 'Tap the mic and repeat the line'}</div>
-    </div>
+          <div className="verdict">
+            <div className="v-title">{good ? '完美! Perfect tones' : `Almost! ${result.score}%`}</div>
+            {!good && <div className="v-sub">Check <b>{miss?.ch} {miss?.py}</b> — {TONE_INFO[miss?.tone ?? 0].name.toLowerCase()}, {TONE_INFO[miss?.tone ?? 0].desc.toLowerCase()}.</div>}
+            <div className="v-actions">
+              {!good && <button className="btn3d ghost" onClick={record} data-testid="retry">Try again</button>}
+              <button className={`btn3d primary ${good ? 'green' : ''}`} onClick={next} data-testid="next-line">Continue</button>
+            </div>
+          </div>
+        ) : (
+          <button className={`btn3d mic-btn ${phase === 'recording' ? 'rec' : ''}`} onClick={record} disabled={phase === 'recording' || phase === 'scoring'} data-testid="mic">
+            🎤 {phase === 'recording' ? 'Listening…' : 'Tap to speak'}
+          </button>
+        )}
+      </footer>
+    </>
   );
 }
 
-function Wave() {
-  return (
-    <div className="wave">
-      {Array.from({ length: 28 }).map((_, i) => <i key={i} style={{ animationDelay: `${(i % 7) * 0.08}s` }} />)}
-    </div>
-  );
-}
-
-/* ---------------- Complete / Rewards ---------------- */
-function Complete() {
-  const { id } = useParams();
+/* ---------------- Lesson complete ---------------- */
+function LessonDone() {
+  const { id, node } = useParams();
+  const loc = useLocation();
   const song = useContent().find((s) => s.id === id);
   const app = useApp();
   const nav = useNavigate();
+  const xp = Number(new URLSearchParams(loc.search).get('xp') || 15);
   const best = Object.values(app.progress[id]?.best || {});
-  const avg = best.length ? Math.round(best.reduce((a, b) => a + b, 0) / best.length) : 0;
-  const earned = 20 + best.reduce((a, b) => a + (b === 100 ? 10 : 5), 0);
+  const acc = node === 'speak' && best.length ? Math.round(best.reduce((a, b) => a + b, 0) / best.length) : node === 'pinyin' ? Math.min(100, Math.round(((xp - 10) / 20) * 100)) : 100;
+  const unitDone = app.progress[id]?.completed;
+  useEffect(() => { chime(true); }, []);
   return (
-    <div className="page complete" style={{ '--c': song?.color }}>
+    <div className="done" style={{ '--c': song?.color }}>
       <Confetti />
-      <div className="trophy">🏆</div>
-      <h2>Song complete!</h2>
+      <Trophy3D height={230} />
+      <h2>{unitDone ? 'Unit complete!' : 'Lesson complete!'}</h2>
       <p className="muted">{song?.title} · {song?.titleEn}</p>
-      <div className="stats">
-        <div><b>+{earned}</b><span>XP earned</span></div>
-        <div><b>{avg}%</b><span>Accuracy</span></div>
-        <div><b>🔥 {app.streak}</b><span>Day streak</span></div>
+      <div className="done-stats">
+        <div className="ds gold"><span>TOTAL XP</span><b>⭐ {xp}</b></div>
+        <div className="ds green"><span>{acc >= 90 ? 'AMAZING' : 'GOOD'}</span><b>🎯 {acc}%</b></div>
+        <div className="ds red"><span>STREAK</span><b>🔥 {app.streak}</b></div>
       </div>
-      <div className="card new-badge">
-        <span className="badge-ic">🎵</span>
-        <div><b>Achievement unlocked</b><div className="muted small">First Song — finish your first song</div></div>
-      </div>
-      <button className="btn primary big" onClick={() => nav('/')} data-testid="continue-home">Continue</button>
+      {unitDone && (
+        <div className="new-badge">
+          <span className="badge-ic">🎵</span>
+          <div><b>Achievement unlocked</b><div className="muted small">First Song — finish your first song</div></div>
+        </div>
+      )}
+      <button className="btn3d primary wide" onClick={() => nav('/')} data-testid="continue-home">Continue</button>
     </div>
   );
 }
@@ -464,7 +518,7 @@ function Confetti() {
   const colors = ['#E8453C', '#F5A623', '#1FA971', '#7B61FF', '#1E88E5'];
   return (
     <div className="confetti">
-      {Array.from({ length: 40 }).map((_, i) => (
+      {Array.from({ length: 36 }).map((_, i) => (
         <i key={i} style={{ left: `${(i * 37) % 100}%`, background: colors[i % 5], animationDelay: `${(i % 10) * 0.12}s`, animationDuration: `${2 + (i % 5) * 0.4}s` }} />
       ))}
     </div>
@@ -479,45 +533,43 @@ function Paywall() {
   const nav = useNavigate();
   const buy = async () => {
     setPaying(true);
-    await wait(1400); // Stripe / Google Play Billing / App Store IAP via backend in production
+    await wait(1400); // App Store / Google Play billing or FPX via backend in production
     actions.upgrade();
+    actions.refillHearts();
     setPaying(false);
   };
   if (app.plan === 'premium')
     return (
-      <div className="page paywall">
-        <div className="pw-hero"><div className="crown">👑</div><h2>You're Premium!</h2><p className="muted">All songs and AI speaking feedback unlocked.</p></div>
-        <button className="btn primary big" onClick={() => nav('/')} data-testid="go-learn">Start learning</button>
+      <div className="paywall">
+        <div className="pw-hero"><MascotHero height={170} chars={['会', '员']} /><h2>You're Premium! 👑</h2><p>All songs, unlimited hearts and AI speaking feedback.</p></div>
+        <button className="btn3d gold wide" onClick={() => nav('/')} data-testid="go-learn">Start learning</button>
       </div>
     );
   return (
-    <div className="page paywall">
+    <div className="paywall">
       <div className="pw-hero">
-        <div className="crown">👑</div>
-        <h2>ChangChang Premium</h2>
-        <p className="muted">Unlock every song and unlimited AI speaking feedback.</p>
+        <MascotHero height={150} chars={['会', '员']} />
+        <h2>ChangChang <span className="pw-tag">PREMIUM</span></h2>
+        <p>Every song, unlimited ❤️ hearts and AI speaking feedback.</p>
       </div>
-      <table className="compare">
-        <thead><tr><th></th><th>Free</th><th>Premium</th></tr></thead>
-        <tbody>
-          <tr><td>Starter songs</td><td>2</td><td>All</td></tr>
-          <tr><td>Pinyin & tone guide</td><td>✓</td><td>✓</td></tr>
-          <tr><td>AI speaking feedback</td><td>5 / day</td><td>Unlimited</td></tr>
-          <tr><td>Offline audio</td><td>—</td><td>✓</td></tr>
-        </tbody>
-      </table>
+      <div className="pw-list">
+        <div><i>🎵</i><b>All songs & units</b><span>Free: 2 songs</span></div>
+        <div><i>❤️</i><b>Unlimited hearts</b><span>Free: 5</span></div>
+        <div><i>🎤</i><b>Unlimited AI speaking</b><span>Free: 5 / day</span></div>
+        <div><i>📴</i><b>Offline audio</b><span>Premium only</span></div>
+      </div>
       <div className="plans">
         <button className={`plan ${plan === 'month' ? 'on' : ''}`} onClick={() => setPlan('month')}>
           <b>Monthly</b><span>RM 14.90 / mo</span>
         </button>
         <button className={`plan ${plan === 'year' ? 'on' : ''}`} onClick={() => setPlan('year')} data-testid="plan-year">
-          <em>Save 33%</em><b>Yearly</b><span>RM 119 / yr</span>
+          <em>SAVE 33%</em><b>Yearly</b><span>RM 119 / yr</span>
         </button>
       </div>
-      <button className="btn primary big" onClick={buy} disabled={paying} data-testid="subscribe">
-        {paying ? 'Processing payment…' : 'Start 7-day free trial'}
+      <button className="btn3d gold wide" onClick={buy} disabled={paying} data-testid="subscribe">
+        {paying ? 'Processing…' : 'Start my free week'}
       </button>
-      <div className="muted tiny center">Cancel anytime · Secure payment via App Store / Google Play / FPX</div>
+      <div className="fine">Cancel anytime · App Store / Google Play / FPX</div>
     </div>
   );
 }
@@ -529,19 +581,18 @@ function Profile() {
   const nav = useNavigate();
   const completed = Object.values(app.progress).filter((p) => p.completed).length;
   return (
-    <div className="page profile">
+    <div className="profile">
       <div className="prof-top">
         <div className="avatar">{app.user?.name?.[0]?.toUpperCase()}</div>
-        <div>
-          <h2>{app.user?.name}</h2>
-          <div className="muted small">{app.user?.email}</div>
-          <span className={`tag ${app.plan === 'premium' ? 'pro' : ''}`}>{app.plan === 'premium' ? '👑 Premium' : 'Free plan'}</span>
-        </div>
+        <h2>{app.user?.name}</h2>
+        <div className="muted small">{app.user?.email} · {app.plan === 'premium' ? '👑 Premium' : 'Free plan'}</div>
       </div>
-      <div className="stats">
-        <div><b>🔥 {app.streak}</b><span>Streak</span></div>
-        <div><b>⭐ {app.xp}</b><span>Total XP</span></div>
-        <div><b>{completed}/{songs.length}</b><span>Songs</span></div>
+      <h3 className="section">Statistics</h3>
+      <div className="stat-grid">
+        <div><span>🔥</span><b>{app.streak}</b><small>Day streak</small></div>
+        <div><span>⭐</span><b>{app.xp}</b><small>Total XP</small></div>
+        <div><span>🎵</span><b>{completed}/{songs.length}</b><small>Songs</small></div>
+        <div><span>💎</span><b>{app.gems}</b><small>Gems</small></div>
       </div>
       <h3 className="section">Achievements</h3>
       <div className="badges">
@@ -554,12 +605,108 @@ function Profile() {
           );
         })}
       </div>
+      <button className="row-card invite-row" onClick={() => nav('/invite')} data-testid="invite-row">
+        <span className="ip-ic sm">🎁</span>
+        <div className="grow"><b>Invite friends</b><div className="muted small">Code {app.referralCode} · {(app.referrals || []).filter((r) => r.status !== 'invited').length} joined</div></div>
+        <span className="ip-go">›</span>
+      </button>
       <h3 className="section">Reminders</h3>
-      <div className="card row">
+      <div className="row-card">
         <div className="grow"><b>Daily practice reminder</b><div className="muted small">Every day at {app.reminderTime}</div></div>
         <button className={`switch ${app.reminders ? 'on' : ''}`} onClick={actions.toggleReminders}><i /></button>
       </div>
-      <button className="btn ghost" onClick={() => { actions.logout(); nav('/login'); }}>Log out</button>
+      <button className="btn3d ghost wide" onClick={() => { actions.logout(); nav('/login'); }}>Log out</button>
+    </div>
+  );
+}
+
+/* ---------------- Referral ---------------- */
+const MILESTONES = [
+  { n: 1, icon: '👑', title: '1 week Premium' },
+  { n: 3, icon: '🗓️', title: '1 month Premium' },
+  { n: 5, icon: '🏅', title: 'Ambassador badge' },
+];
+
+function Invite() {
+  const app = useApp();
+  const nav = useNavigate();
+  const [toast, setToast] = useState('');
+  const code = app.referralCode || 'CHANG-001';
+  const link = `https://changchang.app/r/${code}`;
+  const text = `Let's learn Mandarin by singing on ChangChang 🎵 Use my code ${code} for a free week of Premium!`;
+  const refs = app.referrals || [];
+  const joined = refs.filter((r) => r.status !== 'invited').length;
+  const flash = (m) => { setToast(m); setTimeout(() => setToast(''), 2600); };
+
+  const share = async (channel) => {
+    try {
+      if (channel === 'whatsapp') {
+        window.open(`https://wa.me/?text=${encodeURIComponent(`${text} ${link}`)}`, '_blank');
+      } else if (Capacitor.isNativePlatform()) {
+        await Share.share({ title: 'ChangChang', text, url: link, dialogTitle: 'Invite a friend' });
+      } else if (navigator.share && !window.__DEMO_MODE) {
+        await navigator.share({ title: 'ChangChang', text, url: link });
+      } else {
+        await navigator.clipboard?.writeText(`${text} ${link}`);
+      }
+    } catch { /* user closed the share sheet */ }
+    actions.invite(channel);
+    flash('Invite sent! 📨');
+    // DEMO: simulate the backend telling us a friend used the code
+    setTimeout(() => { const m = actions.demoFriendEvent(); if (m) flash(m); }, 2600);
+  };
+  const copy = async () => {
+    try { await navigator.clipboard?.writeText(code); } catch {}
+    flash('Code copied ✔');
+  };
+
+  return (
+    <div className="invite">
+      <header className="inv-top">
+        <button className="x" onClick={() => nav(-1)} data-testid="inv-back">‹</button>
+        <b>Invite friends</b>
+        <span />
+      </header>
+      <div className="inv-hero">
+        <MascotHero height={150} chars={['朋', '友']} />
+        <h2>Learn together, get Premium free</h2>
+        <p>Your friend gets <b>1 week of Premium</b>. You get <b>1 week</b> for every friend who joins.</p>
+      </div>
+      <div className="code-card">
+        <small>YOUR CODE</small>
+        <b data-testid="ref-code">{code}</b>
+        <button className="btn3d ghost" onClick={copy}>Copy</button>
+      </div>
+      <div className="inv-actions">
+        <button className="btn3d wa" onClick={() => share('whatsapp')}>WhatsApp</button>
+        <button className="btn3d primary" onClick={() => share('share')} data-testid="share">Share link</button>
+      </div>
+      <h3 className="section">Rewards</h3>
+      <div className="ladder">
+        <div className="ladder-bar"><i style={{ width: `${Math.min(100, (joined / 5) * 100)}%` }} /></div>
+        {MILESTONES.map((m) => (
+          <div key={m.n} className={`rung ${joined >= m.n ? 'got' : ''}`}>
+            <span>{joined >= m.n ? '✓' : m.icon}</span>
+            <b>{m.n} friend{m.n > 1 ? 's' : ''}</b>
+            <small>{m.title}</small>
+          </div>
+        ))}
+      </div>
+      <h3 className="section">Your invites <span className="muted small">{joined} joined</span></h3>
+      {refs.length === 0 ? (
+        <div className="empty">No invites yet — share your code to start earning 🎁</div>
+      ) : (
+        <div className="friends">
+          {[...refs].reverse().map((r) => (
+            <div key={r.id} className="friend">
+              <span className="f-av">{r.name ? r.name[0] : '✉️'}</span>
+              <div className="grow"><b>{r.name || 'Invite sent'}</b><small>via {r.channel === 'whatsapp' ? 'WhatsApp' : 'share link'}</small></div>
+              <span className={`f-st ${r.status}`}>{r.status === 'invited' ? 'Pending' : r.status === 'joined' ? 'Joined +50💎' : 'Premium 👑'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {toast && <div className="app-toast">{toast}</div>}
     </div>
   );
 }
